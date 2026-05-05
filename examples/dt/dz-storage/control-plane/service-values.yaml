@@ -40,12 +40,12 @@ data:
       storage_availability_zone = az0
   cinderAPI:
     replicas: 3
-  cinderBackup:
-    replicas: 0
-    topologyRef:
-      name: azone-node-affinity
-    customServiceConfig: |
-      [DEFAULT]
+  # cinderBackup:
+  #   replicas: 0
+  #   topologyRef:
+  #     name: azone-node-affinity
+  #   customServiceConfig: |
+      # [DEFAULT]
       # Not implemented in this example
 
   cinderVolumes:
