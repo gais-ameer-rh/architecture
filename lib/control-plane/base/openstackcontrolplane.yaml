@@ -28,10 +28,6 @@ spec:
         # Debug logs by default, jobs can override as needed.
         [DEFAULT]
         debug = true
-      cinderBackup:
-        networkAttachments:
-          - storage
-        replicas: 0
       cinderScheduler:
         replicas: 1
       cinderVolumes: {}
