@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ceph-conf-files
+  namespace: openstack
+type: Opaque
+data:
+  # This placeholder is replaced by the post-Ceph control-plane stage.
+  az0.client.openstack.keyring: ""
+  az0.conf: ""
+  az1.client.openstack.keyring: ""
+  az1.conf: ""
+  az2.client.openstack.keyring: ""
+  az2.conf: ""

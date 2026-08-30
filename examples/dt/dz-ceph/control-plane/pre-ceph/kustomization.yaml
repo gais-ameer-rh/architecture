@@ -1,0 +1,42 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Start from dz-storage, but do not start storage-backed services until the
+# three Ceph clusters and their client configuration exist.
+resources:
+  - ../../../dz-storage/control-plane
+  - ceph-conf-files.yaml
+
+patches:
+  - target:
+      kind: OpenStackControlPlane
+      name: controlplane
+    patch: |-
+      - op: replace
+        path: /spec/cinder/template/cinderBackups
+        value: {}
+      - op: replace
+        path: /spec/cinder/template/cinderVolumes
+        value: {}
+      - op: replace
+        path: /spec/glance/template/glanceAPIs
+        value:
+          default:
+            replicas: 0
+      - op: replace
+        path: /spec/manila
+        value:
+          enabled: false
+      - op: replace
+        path: /spec/extraMounts
+        value: []
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: unused
+    target:
+      kind: Secret
+      name: (cinder-volume-secrets|osp-secret-manila)-az[0-2]

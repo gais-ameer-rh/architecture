@@ -1,0 +1,55 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../../dz-storage/edpm/computes/r0
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: nova-extra-config-az0
+    patch: |-
+      - op: replace
+        path: /data/25-nova-extra.conf
+        value: |
+          [glance]
+          endpoint_override = https://glance-az0-internal.openstack.svc:9292
+          valid_interfaces = internal
+          [cinder]
+          cross_az_attach = True
+          catalog_info = volumev3:cinderv3:internalURL
+  - target:
+      kind: OpenStackDataPlaneNodeSet
+      name: r0-compute-nodes
+    patch: |-
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneNodeSet
+      metadata:
+        name: r0-compute-nodes
+      spec:
+        nodes:
+          edpm-r0-compute-1:
+            $patch: delete
+          r0-compute-1:
+            $patch: delete
+  - target:
+      kind: OpenStackDataPlaneNodeSet
+      name: r0-compute-nodes
+    patch: |-
+      - op: remove
+        path: /spec/services/14
+      - op: remove
+        path: /spec/services/13
+      - op: add
+        path: /spec/nodeTemplate/extraMounts
+        value:
+          - extraVolType: Ceph
+            mounts:
+              - mountPath: /etc/ceph
+                name: ceph
+                readOnly: true
+            volumes:
+              - name: ceph
+                secret:
+                  secretName: ceph-conf-files

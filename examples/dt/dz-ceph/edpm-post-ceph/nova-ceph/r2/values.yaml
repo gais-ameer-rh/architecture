@@ -1,0 +1,22 @@
+# local-config: referenced, but not emitted by kustomize
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edpm-post-ceph-values
+  annotations:
+    config.kubernetes.io/local-config: "true"
+data:
+  nova:
+    ceph:
+      conf: |
+        [libvirt]
+        images_type=rbd
+        images_rbd_pool=vms
+        images_rbd_ceph_conf=/etc/ceph/az2.conf
+        images_rbd_glance_store_name=default_backend
+        rbd_user=openstack
+        rbd_secret_uuid=CHANGE_TO_CEPH_FSID_AZ2
+        [glance]
+        endpoint_override=https://glance-az2-internal.openstack.svc:9292
+        valid_interfaces=internal

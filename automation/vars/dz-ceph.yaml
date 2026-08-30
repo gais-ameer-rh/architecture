@@ -1,0 +1,335 @@
+---
+vas:
+  dz-ceph:
+    stages:
+      - pre_stage_run:
+          - name: 01 Apply taint on worker-9
+            type: cr
+            definition:
+              spec:
+                taints:
+                  - effect: NoSchedule
+                    key: testOperator
+                    value: 'true'
+                  - effect: NoExecute
+                    key: testOperator
+                    value: 'true'
+            kind: Node
+            resource_name: worker-9
+            state: patched
+          - name: 02 Disable rp_filters on OCP nodes
+            type: cr
+            definition:
+              spec:
+                profile:
+                  - data: |
+                      [main]
+                      summary=Optimize systems running OpenShift (provider specific parent profile)
+                      include=-provider-${f:exec:cat:/var/lib/ocp-tuned/provider},openshift
+
+                      [sysctl]
+                      net.ipv4.conf.enp8s0.rp_filter=0
+                      net.ipv4.conf.enp9s0.rp_filter=0
+                    name: openshift-no-reapply-sysctl
+                recommend:
+                  - match:
+                      # applied to all nodes except worker-9, because worker-9 has no enp8s0
+                      - label: kubernetes.io/hostname
+                        value: worker-0
+                      - label: kubernetes.io/hostname
+                        value: worker-1
+                      - label: kubernetes.io/hostname
+                        value: worker-2
+                      - label: kubernetes.io/hostname
+                        value: worker-3
+                      - label: kubernetes.io/hostname
+                        value: worker-4
+                      - label: kubernetes.io/hostname
+                        value: worker-5
+                      - label: kubernetes.io/hostname
+                        value: worker-6
+                      - label: kubernetes.io/hostname
+                        value: worker-7
+                      - label: kubernetes.io/hostname
+                        value: worker-8
+                      - label: node-role.kubernetes.io/master
+                    operand:
+                      tunedConfig:
+                        reapply_sysctl: false
+                    priority: 15
+                    profile: openshift-no-reapply-sysctl
+            api_version: tuned.openshift.io/v1
+            kind: Tuned
+            resource_name: openshift-no-reapply-sysctl
+            namespace: openshift-cluster-node-tuning-operator
+            state: present
+
+          - name: 03 Deploy SNR/NHC
+            type: playbook
+            source: "../../playbooks/snr-nhc.yml"
+            inventory: "${HOME}/ci-framework-data/artifacts/zuul_inventory.yml"
+
+        name: nncp-configuration
+        path: examples/dt/dz-storage/control-plane/networking/nncp
+        wait_conditions:
+          - >-
+            oc -n openstack wait nncp
+            -l osp/nncm-config-type=standard
+            --for jsonpath='{.status.conditions[0].reason}'=SuccessfullyConfigured
+            --timeout=600s
+        values:
+          - name: network-values
+            src_file: values.yaml
+        build_output: nncp.yaml
+
+      - name: networking
+        path: examples/dt/dz-storage/control-plane/networking
+        wait_conditions:
+          - >-
+            oc -n metallb-system wait pod
+            -l app=metallb -l component=speaker
+            --for condition=Ready
+        values:
+          - name: network-values
+            src_file: nncp/values.yaml
+        build_output: networking.yaml
+
+      - name: topology-configuration
+        path: examples/dt/dz-storage/topology
+        wait_conditions:
+          - >-
+            oc -n openstack wait
+            --for=jsonpath='{.metadata.name}'=azone-node-affinity
+            topology/azone-node-affinity --timeout=60s
+        values:
+          - name: node-zone-labels
+            src_file: node-zone-labels.yaml
+        build_output: topology.yaml
+
+      # allow 180m (not 30m) for larger control plane on more nodes
+      - name: control-plane
+        path: examples/dt/dz-ceph/control-plane/pre-ceph
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackcontrolplane
+            controlplane
+            --for condition=Ready
+            --timeout=180m
+        values:
+          - name: network-values
+            src_file: ../../../dz-storage/control-plane/networking/nncp/values.yaml
+          - name: service-values
+            src_file: ../../../dz-storage/control-plane/service-values.yaml
+        build_output: control-plane.yaml
+        post_stage_run:
+          - name: Create BGPConfiguration after controlplane is deployed
+            type: cr
+            definition:
+              spec: {}
+            api_version: network.openstack.org/v1beta1
+            kind: BGPConfiguration
+            resource_name: bgpconfiguration
+            namespace: openstack
+            state: present
+
+      - name: edpm-computes-r0-nodeset
+        path: examples/dt/dz-ceph/edpm/computes/r0
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r0-compute-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r0-compute-nodeset-values
+            src_file: ../../../../dz-storage/edpm/computes/r0/values.yaml
+        build_output: edpm-r0-compute-nodeset.yaml
+
+      - name: edpm-computes-r1-nodeset
+        path: examples/dt/dz-ceph/edpm/computes/r1
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r1-compute-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r1-compute-nodeset-values
+            src_file: ../../../../dz-storage/edpm/computes/r1/values.yaml
+        build_output: edpm-r1-compute-nodeset.yaml
+
+      - name: edpm-computes-r2-nodeset
+        path: examples/dt/dz-ceph/edpm/computes/r2
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r2-compute-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r2-compute-nodeset-values
+            src_file: ../../../../dz-storage/edpm/computes/r2/values.yaml
+        build_output: edpm-r2-compute-nodeset.yaml
+
+      - name: edpm-ceph-r0-nodeset
+        path: examples/dt/dz-ceph/edpm/ceph/r0
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r0-ceph-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r0-compute-nodeset-values
+            src_file: ../../../../dz-storage/edpm/computes/r0/values.yaml
+        build_output: edpm-r0-ceph-nodeset.yaml
+
+      - name: edpm-ceph-r1-nodeset
+        path: examples/dt/dz-ceph/edpm/ceph/r1
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r1-ceph-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r1-compute-nodeset-values
+            src_file: ../../../../dz-storage/edpm/computes/r1/values.yaml
+        build_output: edpm-r1-ceph-nodeset.yaml
+
+      - name: edpm-ceph-r2-nodeset
+        path: examples/dt/dz-ceph/edpm/ceph/r2
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r2-ceph-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r2-compute-nodeset-values
+            src_file: ../../../../dz-storage/edpm/computes/r2/values.yaml
+        build_output: edpm-r2-ceph-nodeset.yaml
+
+      - name: edpm-networkers-r0-nodeset
+        path: examples/dt/dz-storage/edpm/networkers/r0
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r0-networker-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r0-networker-nodeset-values
+            src_file: values.yaml
+        build_output: edpm-r0-networker-nodeset.yaml
+
+      - name: edpm-networkers-r1-nodeset
+        path: examples/dt/dz-storage/edpm/networkers/r1
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r1-networker-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r1-networker-nodeset-values
+            src_file: values.yaml
+        build_output: edpm-r1-networker-nodeset.yaml
+
+      - name: edpm-networkers-r2-nodeset
+        path: examples/dt/dz-storage/edpm/networkers/r2
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanenodeset
+            r2-networker-nodes
+            --for condition=SetupReady
+            --timeout=600s
+        values:
+          - name: edpm-r2-networker-nodeset-values
+            src_file: values.yaml
+        build_output: edpm-r2-networker-nodeset.yaml
+
+      - name: edpm-deployment
+        path: examples/dt/dz-ceph/edpm/deployment
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanedeployment
+            edpm-deployment
+            --for condition=Ready
+            --timeout=180m
+        values:
+          - name: edpm-deployment-values
+            src_file: values.yaml
+        build_output: edpm-deployment.yaml
+        post_stage_run:
+          - name: Deploy three Ceph clusters
+            type: playbook
+            source: "../../hooks/playbooks/ceph-multiple.yml"
+            inventory: "${HOME}/ci-framework-data/artifacts/zuul_inventory.yml"
+
+      - name: control-plane-post-ceph
+        path: examples/dt/dz-ceph/control-plane
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackcontrolplane
+            controlplane
+            --for condition=Ready
+            --timeout=180m
+        values:
+          - name: network-values-post-ceph
+            src_file: ../../dz-storage/control-plane/networking/nncp/values.yaml
+          - name: service-values-post-ceph
+            src_file: ../../dz-storage/control-plane/service-values.yaml
+        build_output: control-plane-post-ceph.yaml
+
+      - name: edpm-post-ceph-r0
+        path: examples/dt/dz-ceph/edpm-post-ceph/deployment/r0
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanedeployment
+            edpm-post-ceph-r0
+            --for condition=Ready
+            --timeout=180m
+        values:
+          - name: edpm-post-ceph-r0-deployment-values
+            src_file: values.yaml
+          - name: edpm-post-ceph-r0-nova-values
+            src_file: ../../nova-ceph/r0/values.yaml
+        build_output: edpm-post-ceph-r0.yaml
+
+      - name: edpm-post-ceph-r1
+        path: examples/dt/dz-ceph/edpm-post-ceph/deployment/r1
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanedeployment
+            edpm-post-ceph-r1
+            --for condition=Ready
+            --timeout=180m
+        values:
+          - name: edpm-post-ceph-r1-deployment-values
+            src_file: values.yaml
+          - name: edpm-post-ceph-r1-nova-values
+            src_file: ../../nova-ceph/r1/values.yaml
+        build_output: edpm-post-ceph-r1.yaml
+
+      - name: edpm-post-ceph-r2
+        path: examples/dt/dz-ceph/edpm-post-ceph/deployment/r2
+        wait_conditions:
+          - >-
+            oc -n openstack wait openstackdataplanedeployment
+            edpm-post-ceph-r2
+            --for condition=Ready
+            --timeout=180m
+        values:
+          - name: edpm-post-ceph-r2-deployment-values
+            src_file: values.yaml
+          - name: edpm-post-ceph-r2-nova-values
+            src_file: ../../nova-ceph/r2/values.yaml
+        build_output: edpm-post-ceph-r2.yaml
+        post_stage_run:
+          - name: Wait until Nova computes are ready
+            type: playbook
+            source: "nova_wait_for_compute_service.yml"
+            extra_vars:
+              _number_of_computes: 3
+              _cell_conductor: nova-cell0-conductor-0

@@ -1,0 +1,49 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../../dz-storage/edpm/computes/r2
+
+patches:
+  - target:
+      kind: OpenStackDataPlaneNodeSet
+      name: r2-compute-nodes
+    patch: |-
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneNodeSet
+      metadata:
+        name: r2-compute-nodes
+      spec:
+        nodes:
+          edpm-r2-compute-0:
+            $patch: delete
+          r2-compute-0:
+            $patch: delete
+  - target:
+      kind: OpenStackDataPlaneNodeSet
+      name: r2-compute-nodes
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: r2-ceph-nodes
+      - op: replace
+        path: /spec/services
+        value:
+          - bootstrap
+          - download-cache
+          - install-os
+          - configure-network
+          - validate-network
+          - ceph-hci-pre
+          - configure-os
+          - frr
+          - run-os
+          - reboot-os
+          - install-certs
+      - op: add
+        path: /spec/nodeTemplate/ansible/ansibleVars/edpm_ceph_hci_pre_enabled_services
+        value:
+          - ceph_mon
+          - ceph_mgr
+          - ceph_osd

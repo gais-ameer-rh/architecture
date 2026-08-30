@@ -1,0 +1,37 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Reuse the dz-storage control plane and replace only its storage backend.
+resources:
+  - ../../dz-storage/control-plane
+  - ceph-conf-files.yaml
+
+patches:
+  - path: ceph-storage.yaml
+    target:
+      kind: OpenStackControlPlane
+      name: controlplane
+  - patch: |-
+      - op: remove
+        path: /spec/glance/template/apiTimeout
+    target:
+      kind: OpenStackControlPlane
+      name: controlplane
+  - patch: |-
+      - op: replace
+        path: /spec/manila
+        value:
+          enabled: false
+    target:
+      kind: OpenStackControlPlane
+      name: controlplane
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: unused
+    target:
+      kind: Secret
+      name: (cinder-volume-secrets|osp-secret-manila)-az[0-2]
